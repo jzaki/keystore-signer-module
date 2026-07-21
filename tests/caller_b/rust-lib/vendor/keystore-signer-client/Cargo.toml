@@ -1,0 +1,19 @@
+[package]
+name = "keystore-signer-client"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Companion lib for modules that depend on keystore_signer: manages the per-module bearer credential, and provides local (no-IPC) signature verification and hashing."
+
+# Vendored copy — see the comment on this dependency in the enclosing
+# rust-lib's own Cargo.toml. No `[workspace]` table (same reasoning as the
+# vendored keystore-signer-core alongside it).
+
+[dependencies]
+keystore-signer-core = { path = "../keystore-signer-core" }
+zeroize = { version = "1", features = ["derive"] }
+rand = "0.8"
+thiserror = "1"
+
+[dev-dependencies]
+tempfile = "3"

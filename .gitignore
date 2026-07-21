@@ -1,0 +1,24 @@
+# Nix build output
+result
+result-*
+
+# repositories ai agents can reference
+ref-repos
+
+# CMake build directory
+build/
+
+# Rust build artifacts
+target/
+
+# Codegen output (generated/provider_gen.rs etc.) staged by the Logos
+# module Nix build — not source, regenerated from the .lidl contracts.
+generated/
+
+# Clang cache files
+.cache/
+
+# tools used in testing
+logos
+modules
+pm

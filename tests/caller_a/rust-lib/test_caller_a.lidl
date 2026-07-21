@@ -1,0 +1,12 @@
+module test_caller_a {
+  version "0.1.0"
+  description "Integration test fixture: thin pass-through to keystore_signer using this module's own credential."
+  category "testing"
+  depends []
+
+  method createKey(algorithm: tstr) -> tstr description "Creates a key in this module's own keystore_signer namespace."
+  method publicKey(keyId: tstr) -> bstr description "Public key for keyId, looked up under this module's own namespace."
+  method sign(keyId: tstr, message: bstr) -> bstr description "Signs message with keyId under this module's own namespace. Empty if keyId belongs to a different caller."
+  method listKeys() -> [tstr] description "Key ids visible in this module's own namespace."
+  method deleteKey(keyId: tstr) -> bool description "Deletes keyId from this module's own namespace."
+}

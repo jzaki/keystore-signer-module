@@ -1,0 +1,19 @@
+[package]
+name = "test_caller_b"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+serde_json = "1"
+logos-rust-sdk = { path = "../logos-rust-sdk-src" }
+# Vendored, not `path = "../../../keystore-signer-client"`: the Logos Rust
+# build stages only this rust-lib/ directory in isolation (confirmed
+# empirically — see the comment in ../../../rust-lib/Cargo.toml), so a path
+# dependency outside this tree can't resolve. Replace with a git/version
+# dependency once keystore-signer-client is published.
+keystore-signer-client = { path = "vendor/keystore-signer-client" }

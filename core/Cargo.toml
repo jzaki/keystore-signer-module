@@ -1,0 +1,27 @@
+[package]
+name = "keystore-signer-core"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Pure-Rust key storage, signing (Ed25519/secp256k1/BLS12-381) and hashing logic for keystore_signer — no Logos/IPC dependency, usable standalone by the module and by the companion client crate."
+
+[lib]
+name = "keystore_signer_core"
+
+[dependencies]
+zeroize.workspace = true
+sha2.workspace = true
+sha3.workspace = true
+hkdf.workspace = true
+chacha20poly1305.workspace = true
+hex.workspace = true
+thiserror.workspace = true
+
+ed25519-dalek = { version = "2", features = ["rand_core", "zeroize"] }
+# Feature set matches logos-execution-zone's Cargo.toml usage of k256.
+k256 = { version = "0.13", features = ["ecdsa-core", "arithmetic", "expose-field"] }
+blst = "0.3"
+rand = "0.8"
+
+[dev-dependencies]
+tempfile = "3"

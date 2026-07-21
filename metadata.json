@@ -1,0 +1,30 @@
+{
+  "name": "keystore_signer",
+  "display_name": "Keystore Signer",
+  "version": "0.1.0",
+  "type": "core",
+  "interface": "cdylib",
+  "category": "security",
+  "description": "Per-caller isolated signing keystore (Ed25519 / secp256k1 / BLS12-381) — holds keys on behalf of dependent modules without exposing private key material across module boundaries.",
+  "main": "keystore_signer_plugin",
+  "dependencies": [],
+  "include": [],
+  "capabilities": [],
+
+  "codegen": {
+    "lidl": "rust-lib/keystore_signer.lidl",
+    "rust": { "crate": "rust-lib", "staticlib": "keystore_signer" }
+  },
+
+  "nix": {
+    "external_libraries": [],
+    "packages": {
+      "build": [],
+      "runtime": []
+    },
+    "cmake": {
+      "find_packages": [],
+      "extra_include_dirs": []
+    }
+  }
+}

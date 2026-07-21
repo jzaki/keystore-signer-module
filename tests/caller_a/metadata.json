@@ -1,0 +1,24 @@
+{
+  "name": "test_caller_a",
+  "display_name": "Keystore Signer Test Caller A",
+  "version": "0.1.0",
+  "type": "core",
+  "interface": "cdylib",
+  "category": "testing",
+  "description": "Integration test fixture: a thin pass-through to keystore_signer using this module's own credential. Paired with test_caller_b to prove per-caller key isolation over real Logos IPC.",
+  "main": "test_caller_a_plugin",
+  "dependencies": ["keystore_signer"],
+  "include": [],
+  "capabilities": [],
+
+  "codegen": {
+    "lidl": "rust-lib/test_caller_a.lidl",
+    "rust": { "crate": "rust-lib", "staticlib": "test_caller_a" }
+  },
+
+  "nix": {
+    "external_libraries": [],
+    "packages": { "build": [], "runtime": [] },
+    "cmake": { "find_packages": [], "extra_include_dirs": [] }
+  }
+}

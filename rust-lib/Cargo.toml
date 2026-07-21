@@ -1,0 +1,29 @@
+[package]
+name = "keystore_signer"
+version = "0.1.0"
+edition = "2021"
+
+# Standalone crate — the empty table keeps cargo from adopting the repo's
+# Cargo workspace (core / keystore-signer-client). This crate is only ever
+# built by the Logos module Nix pipeline, which stages logos-rust-sdk next
+# to it and compiles it in isolation from the pipeline's own cargo run.
+[workspace]
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+serde_json = "1"
+# The builder stages its own logos-rust-sdk source next to the crate at
+# build time (so a Rust module's flake stays identical to a C++ one).
+logos-rust-sdk = { path = "../logos-rust-sdk-src" }
+# Our own crate, shared with keystore-signer-client. NOT `path = "../core"`:
+# confirmed empirically (2026-07-21 nix build) that the Logos Rust build
+# stages ONLY this `rust-lib/` directory in isolation (source root =
+# .../logos-keystore_signer-rust-src/rust-lib) — sibling directories like
+# ../core are not copied into the sandbox and the build fails to resolve
+# them. `vendor/keystore-signer-core` is a vendored copy kept in sync with
+# ../../core by hand until keystore-signer-core is published (crates.io or
+# a pushed git repo), at which point this should become a normal git/version
+# dependency instead.
+keystore-signer-core = { path = "vendor/keystore-signer-core" }

@@ -1,0 +1,15 @@
+[package]
+name = "keystore-signer-client"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Companion lib for modules that depend on keystore_signer: manages the per-module bearer credential, and provides local (no-IPC) signature verification and hashing."
+
+[dependencies]
+keystore-signer-core = { path = "../core" }
+zeroize.workspace = true
+rand = "0.8"
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

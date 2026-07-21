@@ -1,0 +1,33 @@
+[package]
+name = "keystore-signer-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Pure-Rust key storage, signing (Ed25519/secp256k1/BLS12-381) and hashing logic for keystore_signer — no Logos/IPC dependency, usable standalone by the module and by the companion client crate."
+
+# Vendored copy, consumed as a path dependency of the enclosing rust-lib
+# crate (see the comment on the `keystore-signer-core` dependency in
+# ../../Cargo.toml) — no `[workspace]` table here: rust-lib's own empty
+# `[workspace]` already covers this directory, and Cargo rejects a nested
+# workspace root.
+
+[lib]
+name = "keystore_signer_core"
+
+[dependencies]
+zeroize = { version = "1", features = ["derive"] }
+sha2 = "0.10"
+sha3 = "0.10"
+hkdf = "0.12"
+chacha20poly1305 = "0.10"
+hex = "0.4"
+thiserror = "1"
+
+ed25519-dalek = { version = "2", features = ["rand_core", "zeroize"] }
+# Feature set matches logos-execution-zone's Cargo.toml usage of k256.
+k256 = { version = "0.13", features = ["ecdsa-core", "arithmetic", "expose-field"] }
+blst = "0.3"
+rand = "0.8"
+
+[dev-dependencies]
+tempfile = "3"
