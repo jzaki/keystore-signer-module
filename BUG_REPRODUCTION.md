@@ -145,19 +145,54 @@ different calling module** supplied for an argument in the same position/slot
 shape — regardless of that other call's method name, argument count, or the
 current call's own argument order.
 
+**Also ruled out: a scheduling race.** The reproduction script (`tests/flake.nix`)
+issues every `logoscore call` synchronously via shell command substitution —
+each call blocks until it returns a result before the next line runs, so
+there is no window where two calls are in flight at once from the client
+side. The failure is also 100% reproducible on this exact sequence, not
+intermittent, which is atypical for a race and typical of deterministic
+stale state. This points at a slot/cache that's keyed wrong (e.g. by
+`(target_module, method, arg_position)` instead of by call identity) rather
+than at unsynchronized concurrent access — see "Suspected cause" below. This
+doesn't rule out concurrency *inside* `logoscore`'s own dispatch (e.g. if
+some cleanup from one call races with the next call's dispatch internally)
+— that possibility isn't inspectable from this environment either.
+
 ## Suspected cause (unconfirmed)
 
-Points at a stale-value bug in the generated provider-side dispatch for
-`bstr` arguments — plausibly a buffer or slot that's reused across separate
-inbound calls/connections keyed by position or type rather than freshly
-populated per-dispatch, so a second calling module's call can leak a `bstr`
-value into a later, unrelated call from a first calling module. Candidates
-worth checking first: `logos-lidl-gen`'s generated `provider_gen.rs` dispatch
-table's handling of `bstr` args (`logos_rust_sdk::bytes::decode`, see the
-`"firmware" => ...` case in a generated `provider_gen.rs`), and the cdylib →
-Qt glue layer each inbound call crosses before reaching that dispatch table.
-Not independently confirmed — this repo's own code has no visibility into
-either.
+Points at a stale-value bug — a buffer or slot that's reused across separate
+inbound calls keyed by something like `(target_module, method, arg_position)`
+rather than freshly populated per call, so a second calling module's call can
+leak a `bstr` value into a later, unrelated call from a first calling module.
+
+**Ruled out by reading the actual generator source** (both checked out under
+`ref-repos/`):
+
+- `logos-rust-sdk/lidl-gen/src/rustgen_provider.rs`, which emits the
+  `provider_gen.rs` glue: the `logos_module_dispatch(method, args_json)` C-ABI
+  export parses `args_json` fresh into a local `Vec<serde_json::Value>` on
+  every call and passes it straight to `dispatch(&method, &args)` — no static
+  buffer, no cross-call cache. `logos_rust_sdk::bytes::decode`
+  (`logos-rust-sdk/src/bytes.rs`) is a pure function on a `&serde_json::Value`
+  argument — no shared state at all.
+- `logos-qt-sdk/qt-generator/lidl_gen_cdylib_glue.cpp`, which emits the C++
+  that hosts a Rust cdylib module: `callMethod` builds a local JSON string
+  from its `QVariantList& args` parameter and calls `logos_module_dispatch`
+  synchronously, per call — also no static/shared buffer.
+
+Both layers construct their arguments fresh, per call, from call-local state.
+Neither is a plausible home for this bug.
+
+**Not ruled out, and not inspectable from this environment:** the actual
+routing/transport layer that decides which args get delivered to which
+target module instance — `logos-protocol`, `logos-module-loader` /
+`logos-module-loader-qt`, and `logoscore` itself (plus possibly
+`logos-liblogos` / `logos-container` / `logos-container-subprocess` in the
+IPC path). None of these are checked out under `ref-repos/`; they're consumed
+only as prebuilt packages via the flake inputs pinned in `flake.lock` /
+`tests/flake.lock`. This is where a slot/cache keyed by
+`(target_module, method, arg_position)` instead of by call identity would
+have to live to produce exactly this symptom.
 
 ## Impact
 
