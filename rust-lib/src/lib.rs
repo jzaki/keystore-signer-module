@@ -46,25 +46,42 @@ impl KeystoreSignerImpl {
     }
 }
 
+/// `secret` travels the wire as `tstr` (hex), not `bstr` — see
+/// BUG_REPRODUCTION.md: a `bstr` in this argument slot was observed to
+/// resolve to a *different calling module's* most recent value once a
+/// second caller had made any call in between. Decoding here is the one
+/// point that turns the hex string back into the raw bytes the storage
+/// layer's namespace derivation expects. A malformed hex string decodes to
+/// an empty Vec, which fails downstream (below the 32-byte minimum) the
+/// same way any other bad secret does — no separate error path needed.
+fn decode_secret(secret: &str) -> Vec<u8> {
+    hex::decode(secret).unwrap_or_default()
+}
+
 impl KeystoreSignerModule for KeystoreSignerImpl {
-    fn create_key(&mut self, secret: Vec<u8>, algorithm: String) -> String {
+    fn create_key(&mut self, secret: String, algorithm: String) -> String {
+        let secret = decode_secret(&secret);
         self.with_keystore(|ks| ks.create_key(&secret, &algorithm).unwrap_or_default())
     }
 
-    fn public_key(&mut self, secret: Vec<u8>, key_id: String) -> Vec<u8> {
+    fn public_key(&mut self, secret: String, key_id: String) -> Vec<u8> {
+        let secret = decode_secret(&secret);
         self.with_keystore(|ks| ks.public_key(&secret, &key_id).unwrap_or_default())
     }
 
-    fn sign(&mut self, secret: Vec<u8>, key_id: String, message: Vec<u8>) -> Vec<u8> {
+    fn sign(&mut self, secret: String, key_id: String, message: Vec<u8>) -> Vec<u8> {
+        let secret = decode_secret(&secret);
         self.with_keystore(|ks| ks.sign(&secret, &key_id, &message).unwrap_or_default())
     }
 
-    fn list_keys(&mut self, secret: Vec<u8>) -> Value {
+    fn list_keys(&mut self, secret: String) -> Value {
+        let secret = decode_secret(&secret);
         let ids = self.with_keystore(|ks| ks.list_keys(&secret).unwrap_or_default());
         Value::Array(ids.into_iter().map(Value::String).collect())
     }
 
-    fn delete_key(&mut self, secret: Vec<u8>, key_id: String) -> bool {
+    fn delete_key(&mut self, secret: String, key_id: String) -> bool {
+        let secret = decode_secret(&secret);
         self.with_keystore(|ks| ks.delete_key(&secret, &key_id).unwrap_or(false))
     }
 }

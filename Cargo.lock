@@ -401,6 +401,7 @@ dependencies = [
 name = "keystore-signer-client"
 version = "0.1.0"
 dependencies = [
+ "hex",
  "keystore-signer-core",
  "rand",
  "tempfile",

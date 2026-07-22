@@ -145,6 +145,23 @@ different calling module** supplied for an argument in the same position/slot
 shape — regardless of that other call's method name, argument count, or the
 current call's own argument order.
 
+3. **Argument wire type.** Changed `secret` from `bstr` to `tstr` across
+   every method (hex-encoded on the caller side via a new
+   `Credential::secret_hex()` in `keystore-signer-client`, hex-decoded on
+   `keystore_signer`'s own provider side before touching storage) — i.e.
+   `secret` now travels as a `QString`/`QVariant(QString)` instead of a
+   `QByteArray`/`QVariant(QByteArray)` at the QtRO layer. **Same failure,
+   same symptom**: `test_caller_a.sign` with its own key, called right after
+   `test_caller_b.createKey` intervenes, still returns empty. This rules out
+   "bug is specific to `bstr`/`QByteArray` marshaling" — whatever's
+   happening reproduces identically for a plain string argument, so it's not
+   about the wire type of this particular slot at all.
+
+Combined with the two results above, the trigger isn't the argument's type,
+position, or count — the only constant across every variant tried is
+*multiple replicas attached to one QtRO source*. See the "core_service
+broker" findings below for where this was narrowed to next.
+
 **Also ruled out: a scheduling race.** The reproduction script (`tests/flake.nix`)
 issues every `logoscore call` synchronously via shell command substitution —
 each call blocks until it returns a result before the next line runs, so

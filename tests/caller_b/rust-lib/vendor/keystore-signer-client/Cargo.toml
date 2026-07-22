@@ -14,6 +14,7 @@ keystore-signer-core = { path = "../keystore-signer-core" }
 zeroize = { version = "1", features = ["derive"] }
 rand = "0.8"
 thiserror = "1"
+hex = "0.4"
 
 [dev-dependencies]
 tempfile = "3"

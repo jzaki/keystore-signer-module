@@ -16,7 +16,7 @@ struct CallerImpl {
 }
 
 impl CallerImpl {
-    fn secret(&mut self) -> Vec<u8> {
+    fn secret_hex(&mut self) -> String {
         if self.credential.is_none() {
             let path = context()
                 .map(|c| c.instance_persistence_path)
@@ -25,39 +25,43 @@ impl CallerImpl {
             self.credential =
                 Some(Credential::load_or_create(&path).expect("failed to load/create credential"));
         }
-        self.credential.as_ref().unwrap().secret_bytes().to_vec()
+        self.credential.as_ref().unwrap().secret_hex()
     }
 }
 
 // The generated modules().keystore_signer client takes borrowed args
-// (&[u8]/&str) and returns Result<_, LogosError> — confirmed from a real
+// (&str/&[u8]) and returns Result<_, LogosError> — confirmed from a real
 // generated provider_gen.rs (2026-07-21 nix build). Same "empty means
 // failure" convention as keystore_signer's own provider side: unwrap_or_*
 // rather than propagating LogosError, since there's no `result` envelope
 // declared in this module's own .lidl contract either.
+//
+// `secret` is passed hex-encoded (tstr), not as raw bytes (bstr) — see
+// BUG_REPRODUCTION.md for why keystore_signer's .lidl contract declares it
+// that way.
 impl TestCallerAModule for CallerImpl {
     fn create_key(&mut self, algorithm: String) -> String {
-        let secret = self.secret();
+        let secret = self.secret_hex();
         modules().keystore_signer.create_key(&secret, &algorithm).unwrap_or_default()
     }
 
     fn public_key(&mut self, key_id: String) -> Vec<u8> {
-        let secret = self.secret();
+        let secret = self.secret_hex();
         modules().keystore_signer.public_key(&secret, &key_id).unwrap_or_default()
     }
 
     fn sign(&mut self, key_id: String, message: Vec<u8>) -> Vec<u8> {
-        let secret = self.secret();
+        let secret = self.secret_hex();
         modules().keystore_signer.sign(&secret, &key_id, &message).unwrap_or_default()
     }
 
     fn list_keys(&mut self) -> Value {
-        let secret = self.secret();
+        let secret = self.secret_hex();
         modules().keystore_signer.list_keys(&secret).unwrap_or(Value::Array(Vec::new()))
     }
 
     fn delete_key(&mut self, key_id: String) -> bool {
-        let secret = self.secret();
+        let secret = self.secret_hex();
         modules().keystore_signer.delete_key(&secret, &key_id).unwrap_or(false)
     }
 }

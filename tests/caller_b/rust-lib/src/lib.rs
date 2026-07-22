@@ -16,7 +16,7 @@ struct CallerImpl {
 }
 
 impl CallerImpl {
-    fn secret(&mut self) -> Vec<u8> {
+    fn secret_hex(&mut self) -> String {
         if self.credential.is_none() {
             let path = context()
                 .map(|c| c.instance_persistence_path)
@@ -25,34 +25,34 @@ impl CallerImpl {
             self.credential =
                 Some(Credential::load_or_create(&path).expect("failed to load/create credential"));
         }
-        self.credential.as_ref().unwrap().secret_bytes().to_vec()
+        self.credential.as_ref().unwrap().secret_hex()
     }
 }
 
 // See the matching comment in test_caller_a's rust-lib/src/lib.rs.
 impl TestCallerBModule for CallerImpl {
     fn create_key(&mut self, algorithm: String) -> String {
-        let secret = self.secret();
+        let secret = self.secret_hex();
         modules().keystore_signer.create_key(&secret, &algorithm).unwrap_or_default()
     }
 
     fn public_key(&mut self, key_id: String) -> Vec<u8> {
-        let secret = self.secret();
+        let secret = self.secret_hex();
         modules().keystore_signer.public_key(&secret, &key_id).unwrap_or_default()
     }
 
     fn sign(&mut self, key_id: String, message: Vec<u8>) -> Vec<u8> {
-        let secret = self.secret();
+        let secret = self.secret_hex();
         modules().keystore_signer.sign(&secret, &key_id, &message).unwrap_or_default()
     }
 
     fn list_keys(&mut self) -> Value {
-        let secret = self.secret();
+        let secret = self.secret_hex();
         modules().keystore_signer.list_keys(&secret).unwrap_or(Value::Array(Vec::new()))
     }
 
     fn delete_key(&mut self, key_id: String) -> bool {
-        let secret = self.secret();
+        let secret = self.secret_hex();
         modules().keystore_signer.delete_key(&secret, &key_id).unwrap_or(false)
     }
 }

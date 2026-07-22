@@ -29,10 +29,10 @@
 //!     &context().unwrap().instance_persistence_path,
 //! )?;
 //! let key_id = modules().keystore_signer.create_key(
-//!     credential.secret_bytes().to_vec(), "ed25519".to_string(),
+//!     &credential.secret_hex(), "ed25519",
 //! );
 //! let signature = modules().keystore_signer.sign(
-//!     credential.secret_bytes().to_vec(), key_id.clone(), message.clone(),
+//!     &credential.secret_hex(), &key_id, &message,
 //! );
 //! assert!(keystore_signer_client::verify(
 //!     keystore_signer_client::Algorithm::Ed25519, &public_key, &message, &signature,
@@ -111,6 +111,14 @@ impl Credential {
     pub fn secret_bytes(&self) -> &[u8] {
         &self.0[..]
     }
+
+    /// Hex-encoded secret, ready to pass as keystore_signer's `secret: tstr`
+    /// argument. keystore_signer's `.lidl` contract takes `secret` as `tstr`
+    /// (not `bstr`) specifically so callers go through this — see
+    /// BUG_REPRODUCTION.md for why.
+    pub fn secret_hex(&self) -> String {
+        hex::encode(&self.0[..])
+    }
 }
 
 #[cfg(unix)]
@@ -175,6 +183,15 @@ mod tests {
             Err(Error::CorruptCredential { .. }) => {}
             _ => panic!("expected CorruptCredential"),
         }
+    }
+
+    #[test]
+    fn secret_hex_round_trips_to_secret_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let cred = Credential::load_or_create(dir.path().to_str().unwrap()).unwrap();
+        let hex_str = cred.secret_hex();
+        assert_eq!(hex_str.len(), SECRET_LEN * 2);
+        assert_eq!(hex::decode(&hex_str).unwrap(), cred.secret_bytes());
     }
 
     #[test]
