@@ -183,16 +183,113 @@ leak a `bstr` value into a later, unrelated call from a first calling module.
 Both layers construct their arguments fresh, per call, from call-local state.
 Neither is a plausible home for this bug.
 
-**Not ruled out, and not inspectable from this environment:** the actual
-routing/transport layer that decides which args get delivered to which
-target module instance — `logos-protocol`, `logos-module-loader` /
-`logos-module-loader-qt`, and `logoscore` itself (plus possibly
-`logos-liblogos` / `logos-container` / `logos-container-subprocess` in the
-IPC path). None of these are checked out under `ref-repos/`; they're consumed
-only as prebuilt packages via the flake inputs pinned in `flake.lock` /
-`tests/flake.lock`. This is where a slot/cache keyed by
-`(target_module, method, arg_position)` instead of by call identity would
-have to live to produce exactly this symptom.
+**Update: `logos-protocol`, `logos-module-loader`, and `logos-logoscore-cli`
+have since been checked out under `ref-repos/` and read in full for the
+relevant call paths.** This ruled out the rest of the Logos-authored stack
+and narrowed the suspect to one specific, no-longer-Logos-authored piece:
+
+- `ModuleProxy::callRemoteMethod` (`logos-protocol/cpp/module_proxy.cpp`)
+  forwards its `const QVariantList& args` parameter straight to
+  `m_provider->callMethod(methodName, args)` — no caching.
+- The `plain` (TCP/JSON-RPC) transport is clean top to bottom:
+  `PlainTransportHost::onCall` (`.../implementations/plain/plain_transport_host.cpp`)
+  decodes `req.args` into a local `QVariantList args` and captures it *by
+  value* into a lambda before queuing it onto the target object's thread;
+  `RpcConnection<Stream>` (`.../implementations/plain/rpc_connection.h`) gives
+  each TCP connection its own private read buffer and frame reader — no
+  cross-connection sharing; `qvariant_rpc_value.cpp`'s `RpcValue`↔`QVariant`
+  conversions always allocate a fresh `QByteArray`/`RpcBytes` per value.
+- `logos-logoscore-cli/src/daemon/daemon.cpp` confirms the process topology:
+  each module loads as its own `logos_host` child subprocess ("launch
+  logos_host in remote mode"), not in-process with the daemon.
+- Critically, **local (same-host) module-to-module calls do not go over the
+  `plain` transport at all — they go over Qt's own QtRemoteObjects (QtRO).**
+  `logos-protocol/cpp/logos_api_consumer.cpp:123-163`
+  (`LogosAPIConsumer::invokeRemoteMethod` / `acquireCachedObject`) caches a
+  `LogosObject*` handle per target-object-name per calling process (comment:
+  "Acquiring a QtRO replica per call is expensive") and forwards each call's
+  own `args` through it fresh — clean. But
+  `logos-protocol/cpp/implementations/qt_remote/remote_transport.cpp` shows
+  what that handle actually is: `RemoteTransportConnection::requestObject`
+  calls `QRemoteObjectNode::acquireDynamic(objectName)`, and
+  `RemoteTransportHost::publishObject` calls
+  `QRemoteObjectHostBase::enableRemoting(object, name)` — real Qt API calls,
+  not Logos wrappers. `keystore_signer`'s `ModuleProxy` is published as a
+  fully **dynamic** QtRO source (no compile-time `.rep`), and `test_caller_a`
+  / `test_caller_b` each hold their own **QtRO replica** pointed at that one
+  source.
+
+That hand-off is the wall. Unmarshaling an inbound method-call packet from a
+replica and dispatching it to the source object — with the right arguments,
+when *multiple replicas* are attached to the same source — happens entirely
+inside Qt's own `QtRemoteObjects` module (e.g. its dynamic-replica /
+`SourceApiMap` machinery). That code isn't vendored in any of
+`logos-protocol`, `logos-rust-sdk`, `logos-qt-sdk`, `logos-module-loader`, or
+`logos-logoscore-cli` — it's part of the Qt library itself, outside every
+repo checked so far. Given every Logos-authored layer on both sides of this
+hand-off is confirmed clean and correctly per-call-scoped, this is now the
+leading suspect: a source with N attached replicas, where QtRO's dynamic
+dispatch path keys an inbound argument buffer more coarsely than "this
+specific replica's this specific in-flight call" (e.g. by method index
+alone), so one replica's (`test_caller_b`'s) call can leave data that a
+later call from a *different* replica (`test_caller_a`'s) reads back.
+
+**Update: this diagnostic was carried out.** `tests/flake.nix` now sets
+`QT_LOGGING_RULES="qt.remoteobjects*=true"` (category names confirmed by
+running `strings` on the actual built `libQt6RemoteObjects.so` — `.io` and
+`.models` are real; the wildcard also catches any not seen in that scan) and
+launches the daemon with `--verbose`. The `--verbose` flag turned out to be
+load-bearing: `logoscore`'s own `qInstallMessageHandler` (`main.cpp`) drops
+every `QtDebugMsg`/`QtInfoMsg`/`QtWarningMsg` unconditionally unless a
+process-local `g_verbose` (set only by `-v`/`--verbose` on that process's own
+argv) is true — independent of whatever `QT_LOGGING_RULES` says, which only
+controls whether Qt calls the handler at all. `fail()` was also extended to
+dump any `*.log` file found anywhere under the daemon's config dir, in case
+module subprocesses log somewhere other than the daemon's own captured
+stdout/stderr.
+
+Result: this surfaced ~1300 lines of real QtRO wire trace — but all of it
+from **the daemon's own broker path**, not the path we actually needed.
+`logoscore call <module> <method> <args>` (used by both the CLI and by this
+test's `call()` helper) does not connect to the target module directly: it
+invokes a method literally named `callModuleMethod` on **`core_service`**, a
+`ModuleProxy` published in-process inside the daemon itself ("Register
+core_service as an in-process module" in `daemon.cpp`). `core_service`'s
+handler for that call is what actually does the work: it creates (and, per
+target-module-name, caches — confirmed by the second call to a given target
+skipping the "Connecting to registry" steps the first call needed) its own
+`LogosAPIClient` and connects **directly** to the real target module's own
+QtRO registry (`local:logos_test_caller_a_<instanceId>`, etc.) to invoke the
+real method. Traced this path in full for every call in the test sequence
+(A's createKey, B's createKey, A's sign, B's sign): distinct targets get
+distinct auth tokens and distinct cached connections, no cross-wiring
+anywhere in the trace. This path is clean — but it's the wrong path.
+
+The corruption happens one hop further in: inside `test_caller_a`'s (and
+`test_caller_b`'s) *own* `logos_host` subprocess, when its Rust code calls
+`modules().keystore_signer.sign(...)` → `lp_invoke` → a *different*
+`LogosAPIClient` (created via `lp_client_create("keystore_signer",
+"test_caller_a", ...)`, per `logos_protocol.cpp`) that connects directly to
+`keystore_signer`'s own registry. That traffic never appeared anywhere in
+this run — not merged into `daemon.log`, and `fail()`'s new `find ... -name
+'*.log'` swept the whole config dir and found nothing else either. The most
+likely explanation: `--verbose`/`g_verbose` is a flag read from *that
+process's own* argv, and the daemon's `--verbose` doesn't propagate to
+however `liblogos` (via `logos_core_start()`, opaque — not in any checked-out
+ref-repo) constructs each module subprocess's launch arguments. Whether
+`QT_LOGGING_RULES` (an inherited env var, unlike the argv flag) is even
+enough on its own — i.e. whether `logos_host` has a default Qt message
+handler that would honor it, and where that process's stdout/stderr actually
+goes once spawned — is unknown without either `liblogos` source or a way to
+control/capture a `logos_host` child process's own I/O, neither of which is
+available from this repo or the currently-checked-out ref-repos.
+
+**Net effect of this session:** ruled out one more entire layer (the daemon
+broker) with real trace evidence instead of source-reading inference, and
+precisely located the remaining wall — not "QtRemoteObjects in general" but
+specifically *the direct module-to-module `LogosAPIClient` connection made
+from inside a `logos_host` subprocess*, whose own logs this test harness
+cannot currently reach.
 
 ## Impact
 

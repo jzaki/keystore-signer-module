@@ -68,6 +68,17 @@
             } ''
             mkdir -p $out
             export QT_QPA_PLATFORM=offscreen
+            # Diagnostic for the cross-caller bstr corruption bug (see
+            # ../BUG_REPRODUCTION.md): local module-to-module calls ride Qt's
+            # own QtRemoteObjects (keystore_signer is published as a dynamic
+            # QtRO source; each caller module holds its own QtRO replica
+            # against it). Category names confirmed by `strings` on the built
+            # libQt6RemoteObjects.so (qt.remoteobjects.io, .models — wildcard
+            # to also catch any category not seen in that scan). Module
+            # subprocesses (logos_host) inherit the daemon's environment, so
+            # this should surface their QtRO traffic too, not just the
+            # daemon's own.
+            export QT_LOGGING_RULES="qt.remoteobjects*=true"
             export LOGOSCORE_CONFIG_DIR="$(mktemp -d)"
             DAEMON_PID=""
             cleanup() {
@@ -77,7 +88,14 @@
             }
             trap cleanup EXIT
 
-            logoscore -D --config-dir "$LOGOSCORE_CONFIG_DIR" -m ${modulesDir} \
+            # --verbose unlocks the daemon's own QtDebugMsg/QtInfoMsg/QtWarningMsg
+            # output (logoscore's message handler in main.cpp drops those types
+            # unconditionally unless g_verbose is set — independent of
+            # QT_LOGGING_RULES, which only controls whether Qt calls the handler
+            # at all). Module subprocesses (logos_host) are a separate binary we
+            # don't have source for, so it's unknown whether they have a similar
+            # gate; QT_LOGGING_RULES above is the only lever we have for them.
+            logoscore -D --verbose --config-dir "$LOGOSCORE_CONFIG_DIR" -m ${modulesDir} \
               >"$LOGOSCORE_CONFIG_DIR/daemon.log" 2>&1 &
             DAEMON_PID=$!
             ready=0
@@ -96,7 +114,19 @@
             logoscore --config-dir "$LOGOSCORE_CONFIG_DIR" load-module test_caller_a
             logoscore --config-dir "$LOGOSCORE_CONFIG_DIR" load-module test_caller_b
 
-            fail() { echo "FAIL: $1" >&2; echo "--- daemon.log ---" >&2; cat "$LOGOSCORE_CONFIG_DIR/daemon.log" >&2; exit 1; }
+            fail() {
+              echo "FAIL: $1" >&2
+              echo "--- daemon.log ---" >&2
+              cat "$LOGOSCORE_CONFIG_DIR/daemon.log" >&2
+              # In case module subprocesses (logos_host) log somewhere other
+              # than the daemon's own captured stdout/stderr — dump every
+              # other log file found under the config dir too.
+              find "$LOGOSCORE_CONFIG_DIR" -name '*.log' ! -name 'daemon.log' -print 2>/dev/null | while read -r f; do
+                echo "--- $f ---" >&2
+                cat "$f" >&2
+              done
+              exit 1
+            }
 
             call() {
               # $1=module $2=method, rest=args; prints the bare .result value.
