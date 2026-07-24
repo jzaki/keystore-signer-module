@@ -1,5 +1,38 @@
 # Cross-caller `bstr` argument corruption in generated Rust module dispatch
 
+## Status: fixed upstream as of `logos-logoscore-cli` 0.2.2-RC1
+
+Pinning `tests/flake.nix`'s `logos-logoscore-cli` input to the
+`0.2.2-RC1` tag (`github:logos-co/logos-logoscore-cli/0.2.2-RC1`, resolves to
+commit `f4753ddc19dd9989f4a701d19d9d3c5d5934a405`) makes the full isolation
+test pass cleanly: `test_caller_a.sign` returns a real signature immediately
+after `test_caller_b.createKey` intervenes, forged signatures from the wrong
+caller correctly come back empty, and every other isolation assertion in
+`tests/flake.nix` holds. Confirmed via `nix build
+.#checks.x86_64-linux.isolation-test -L` → `result/result.txt`:
+`keystore_signer cross-caller isolation test passed`.
+
+Everything below this point (originally written while the bug was still
+open, against whatever `logos-logoscore-cli` revision `flake.lock` had
+resolved to as of 2026-07-21/22 before this pin) is kept as the diagnostic
+record — the repro steps, the ruled-out hypotheses (argument order, argument
+packing, `bstr` vs `tstr` wire type), and the narrowing down to the
+`core_service` broker being clean and the actual corruption living in the
+direct `logos_host`-to-`logos_host` `LogosAPIClient` connection. That
+narrowing is presumably close to whatever was actually fixed between the
+pre-RC1 revision and `0.2.2-RC1`, though the fix's exact commit/changelog
+wasn't independently identified.
+
+One unrelated thing this surfaced: `tests/flake.nix`'s own `call()` test
+helper had a latent bug — `jq -r '.result'` on a `bstr` return value (the
+tagged `{"_bytes": "..."}` envelope) prints the object's compact JSON
+verbatim rather than `""` when the bytes are empty, so an *empty, correctly-
+rejected* forged signature was being misreported as a non-empty one. Fixed
+alongside the version pin (`call()` now unwraps `.result._bytes` when
+present) — this was a test-harness bug, unrelated to the platform bug above,
+but it had been silently making the forged-signature assertions untrustworthy
+even independent of whether the real bug was fixed.
+
 ## Summary
 
 A Logos Rust `cdylib` provider module with a method taking a `bstr` parameter

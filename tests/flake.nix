@@ -3,7 +3,7 @@
 
   inputs = {
     logos-module-builder.url = "github:logos-co/logos-module-builder";
-    logos-logoscore-cli.url = "github:logos-co/logos-logoscore-cli";
+    logos-logoscore-cli.url = "github:logos-co/logos-logoscore-cli/0.2.2-RC1";
     nixpkgs.follows = "logos-module-builder/nixpkgs";
   };
 
@@ -140,7 +140,15 @@
               if [ "$rc" -ne 0 ]; then
                 fail "logoscore call $module.$method failed (rc=$rc): $raw"
               fi
-              result=$(printf '%s' "$raw" | jq -r '.result' 2>&1) || fail "could not parse .result from: $raw"
+              # bstr returns are the tagged {"_bytes": "<base64url>"} envelope
+              # (see logos-rust-sdk's bytes.rs) — jq -r on an object prints its
+              # compact JSON verbatim, not "", so an empty signature/pubkey
+              # would otherwise show up as the non-empty string {"_bytes":""}.
+              # Unwrap that one field when present; pass everything else
+              # (strings, bools, arrays) through unchanged.
+              result=$(printf '%s' "$raw" | jq -r \
+                'if (.result | type) == "object" and (.result | has("_bytes")) then .result._bytes else .result end' \
+                2>&1) || fail "could not parse .result from: $raw"
               printf '%s' "$result"
             }
 

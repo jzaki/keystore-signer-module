@@ -8,10 +8,12 @@ Supports Ed25519, secp256k1 (ECDSA), and BLS12-381 signing, plus keccak256/
 sha256 hashing (the hashing and signature-verification helpers run entirely
 client-side, no IPC required).
 
-> **Known issue:** the `sign` method is currently broken by an apparent
-> platform-level bug in cross-module `bstr` argument dispatch — see
-> [BUG_REPRODUCTION.md](BUG_REPRODUCTION.md). `createKey`, `publicKey`,
-> `listKeys`, and `deleteKey` are unaffected in the scenarios tested so far.
+> **Formerly broken, now fixed upstream:** cross-module calls into `sign`
+> used to receive a *different calling module's* most recent argument value
+> once a second caller had made any call in between — a platform-level bug,
+> not this module's. Fixed as of `logos-logoscore-cli` 0.2.2-RC1 (pinned in
+> `tests/flake.nix`); see [BUG_REPRODUCTION.md](BUG_REPRODUCTION.md) for the
+> full diagnostic history.
 
 ## Why this exists
 
@@ -108,10 +110,8 @@ cd tests
 nix build .#checks.x86_64-linux.isolation-test -L
 ```
 
-This currently fails partway through, at the `sign` step — see
-[BUG_REPRODUCTION.md](BUG_REPRODUCTION.md). Everything before that point
-(module loading, dependency resolution, credential bootstrap, `createKey`
-producing distinct namespaces for distinct callers) passes.
+This passes end to end (see [BUG_REPRODUCTION.md](BUG_REPRODUCTION.md) for
+the platform bug it used to catch, now fixed upstream).
 
 ## API (`rust-lib/keystore_signer.lidl`)
 
@@ -119,7 +119,7 @@ producing distinct namespaces for distinct callers) passes.
 |---|---|---|
 | `createKey` | `(secret: bstr, algorithm: tstr) -> tstr` | `algorithm` is `"ed25519"` \| `"secp256k1"` \| `"bls12_381"`. Returns a key id, empty string on failure. |
 | `publicKey` | `(secret: bstr, keyId: tstr) -> bstr` | Empty on failure (unknown key, or someone else's key id). |
-| `sign` | `(secret: bstr, keyId: tstr, message: bstr) -> bstr` | Empty on failure. **Currently broken, see above.** |
+| `sign` | `(secret: bstr, keyId: tstr, message: bstr) -> bstr` | Empty on failure. |
 | `listKeys` | `(secret: bstr) -> [tstr]` | Key ids in the caller's own namespace only. |
 | `deleteKey` | `(secret: bstr, keyId: tstr) -> bool` | `false` if the key id doesn't exist in the caller's namespace. |
 
@@ -142,13 +142,14 @@ credential) and the fully local part (verification):
 use keystore_signer_client::{Algorithm, Credential};
 
 let credential = Credential::load_or_create(&context().unwrap().instance_persistence_path)?;
+let secret = credential.secret_bytes();
 
 let key_id = modules().keystore_signer
-    .create_key(credential.secret_bytes().to_vec(), "ed25519".to_string())?;
+    .create_key(secret, "ed25519")?;
 let public_key = modules().keystore_signer
-    .public_key(credential.secret_bytes().to_vec(), key_id.clone())?;
+    .public_key(secret, &key_id)?;
 let signature = modules().keystore_signer
-    .sign(credential.secret_bytes().to_vec(), key_id, message.clone())?;
+    .sign(secret, &key_id, &message)?;
 
 // No IPC — pure local verification against the public key:
 assert!(keystore_signer_client::verify(Algorithm::Ed25519, &public_key, &message, &signature)?);
